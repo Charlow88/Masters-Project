@@ -1,0 +1,4 @@
+{
+  "python.defaultInterpreterPath": "/Users/<you>/miniforge3/envs/masters_project/bin/python",
+  "python.terminal.activateEnvironment": true
+}

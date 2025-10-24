@@ -1,0 +1,18 @@
+What are wigner plots? (or wigner functions)
+
+A way to visualise a quantum state in something that looks like a classical phase space
+space of position x and momentum p
+
+QM - cant know both x and p simultaneously, can describe the probability-like distribution using Wigner function
+
+Coherent state: round gaussian blob centred at (x0, p0)
+Squeezed state: elliptical blob, squeezed in one direction stretched in the other
+Cat state: two blobs with interference fringes (alternating positive\negative regions)
+
+Can be negative - makes it quantum
+
+NN takes wigner image and recognises something about underlying quantum state
+    - can make it classify the type of state
+
+
+

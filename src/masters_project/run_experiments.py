@@ -68,7 +68,6 @@ def evaluate_model_fidelity(model, X_test_t, Y_test, is_cnn=False):
 
 
 def main():
-    os.makedirs("plots", exist_ok=True)
 
     np.random.seed(seed)
     torch.manual_seed(seed)

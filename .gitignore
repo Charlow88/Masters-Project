@@ -1,81 +1,14 @@
-# ------------------------------
-# Python cache and build files
-# ------------------------------
+# Python cache
 __pycache__/
-# *.py[cod]
-*.egg-info/
-*.egg
-*.pyo
-*.pyd
-*.so
-build/
-dist/
 
-# ------------------------------
-# Jupyter and IPython
-# ------------------------------
-.ipynb_checkpoints/
-*.ipynb_convert
-*.nbconvert/
-*.nbconvert.ipynb
-
-# ------------------------------
-# Environments
-# ------------------------------
+# Virtual environments
 .venv/
-env/
 venv/
-ENV/
-# Conda envs live outside project, but if you ever make local ones:
-*.conda
-*.yml.lock
 
-# ------------------------------
-# Logs, Outputs, Artifacts
-# ------------------------------
-outputs/
-artifacts/
-logs/
-*.log
-*.joblib
-*.pkl
-*.sav
-*.h5
-*.csv~
-*.parquet~
+# Jupyter checkpoints
+.ipynb_checkpoints/
 
-# ------------------------------
-# Data (keep only small samples)
-# ------------------------------
-data/raw/
-data/cleaned/
-data/external/
-# Uncomment below if you want to ignore all data except placeholders
-# data/*
-
-# ------------------------------
-# Reports and generated figures
-# ------------------------------
-reports/figures/
-reports/tables/
-*.pdf
-*.png
-*.jpg
-*.svg
-
-# ------------------------------
-# IDEs and editor settings
-# ------------------------------
+# OS + editor junk
+.DS_Store
 .vscode/
 .idea/
-*.swp
-*.swo
-.DS_Store
-Thumbs.db
-
-# ------------------------------
-# OS junk files
-# ------------------------------
-.DS_Store
-ehthumbs.db
-Icon?

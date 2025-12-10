@@ -2,7 +2,7 @@
 # Python cache and build files
 # ------------------------------
 __pycache__/
-*.py[cod]
+# *.py[cod]
 *.egg-info/
 *.egg
 *.pyo

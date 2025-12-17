@@ -8,6 +8,9 @@ venv/
 # Jupyter checkpoints
 .ipynb_checkpoints/
 
+# Graphs
+*.png
+
 # OS + editor junk
 .DS_Store
 .vscode/

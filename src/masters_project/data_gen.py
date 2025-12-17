@@ -3,7 +3,12 @@ from .measurements import measure_state
 
 
 def random_mixed_state() -> np.ndarray:
-    """Generate a random 4x4 mixed state using the Ginibre ensemble."""
+    """
+    Generate a random 4x4 mixed state using the Ginibre ensemble.
+
+    This guarantees Hermiticity and positive semi-definiteness with trace 1
+    Only mixed states are produced here.
+    """
     G = (np.random.normal(size=(4, 4))
          + 1j * np.random.normal(size=(4, 4)))
     rho = G @ G.conj().T

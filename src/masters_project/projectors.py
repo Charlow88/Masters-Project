@@ -1,5 +1,5 @@
 import numpy as np
-
+ 
 
 def proj(ket: np.ndarray) -> np.ndarray:
     """|ket><ket| projector."""
@@ -10,6 +10,8 @@ def build_projector_matrix() -> np.ndarray:
     """
     Build the 6x6 matrix P of two-qubit projectors as in Lohani.
     P[i, j] is a 4x4 projector.
+    
+    The projectors represent different measurements of the photon polarisations
     """
     H = np.array([[1.0], [0.0]], dtype=complex)
     V = np.array([[0.0], [1.0]], dtype=complex)

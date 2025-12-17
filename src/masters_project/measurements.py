@@ -24,6 +24,8 @@ def rotate_projector(P_ij: np.ndarray, sigma: float) -> np.ndarray:
 def measure_state(rho: np.ndarray, P: np.ndarray, sigma: float) -> np.ndarray:
     """
     Return 6x6 matrix of noisy measurement probabilities M_ij = Tr(rho P_ij^noisy).
+
+    The measurement probabilities are for each of the 36 two-qubit projectors
     """
     M = np.empty((6, 6), dtype=float)
     for i in range(6):

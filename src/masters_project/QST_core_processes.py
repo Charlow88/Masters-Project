@@ -199,3 +199,8 @@ def generate_dataset_of_states_and_probabilities(N: int, P: np.ndarray, n_qubits
         Ms[k] = M
 
     return rhos, Ms
+
+#--------------------------------------------------
+# SIMULATING SHOTS AND EXPERIMENTAL OUTCOMES/ NOISE
+#--------------------------------------------------
+

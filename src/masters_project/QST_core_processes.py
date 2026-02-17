@@ -21,27 +21,48 @@ def generate_random_mixed_state(n_qubits: int) -> np.ndarray:
     rho /= np.trace(rho)
     return rho
 
-def generate_dataset_of_states_and_probabilities(N: int, n_qubits: int, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
+def generate_random_pure_state(n_qubits: int, eps: float = 1e-6) -> np.ndarray:
     """
-    A function to generate a dataset of N random mixed states and their corresponding Cholesky decompositions.
-    
-    :param N: Number of random mixed states and probabilities to generate
-    :param n_qubits: Number of qubits in the system
+    Generate a random pure state density matrix rho = |psi><psi| via a random complex vector.
+    Made nearly pure by mixing with a small amount of identity (eps) to ensure numerical stability in Cholesky decomposition.
+    """
+    d = 2 ** n_qubits
+    psi = np.random.normal(size=(d,)) + 1j * np.random.normal(size=(d,))
+    psi /= np.linalg.norm(psi)
+    rho = np.outer(psi, psi.conj())
+    rho = (1.0 - eps) * rho + eps * np.eye(d, dtype=complex) / d
+    return rho
 
-    Outputs:
-        rhos: (N,) array of 2^n_qubits x 2^n_qubits density matrices
-        taus: (N,) array of 2^n_qubits x 2^n_qubits Cholesky decompositions of the density matrices
+def generate_dataset_of_states_and_probabilities(
+        N: int,
+        n_qubits: int,
+        seed: int = 0,
+        p_pure: float = 0.3,
+        eps_pure: float = 1e-6
+    ) -> tuple[np.ndarray, np.ndarray]:
     """
+    Generate a dataset of N states containing a mix of mixed and (nearly) pure states,
+    along with Cholesky factors taus.
+    
+    p_pure: fraction of samples generated as (nearly) pure states.
+    eps_pure: depolarising amount used to make pure states full-rank for Cholesky.
+    """
+    np.random.seed(seed)
 
     rhos = np.empty(N, dtype=object)
     taus = np.empty(N, dtype=object)
-    np.random.seed(seed)
+
     for k in range(N):
-        rho = generate_random_mixed_state(n_qubits)
+        if np.random.rand() < p_pure:
+            rho = generate_random_pure_state(n_qubits, eps=eps_pure)
+        else:
+            rho = generate_random_mixed_state(n_qubits)
+
         rhos[k] = rho
         taus[k] = np.linalg.cholesky(rho)
 
     return rhos, taus
+
 
 def add_train_test_split_to_data(data: dict, train_ratio: float = 0.8, seed: int = 0) -> dict:
     """

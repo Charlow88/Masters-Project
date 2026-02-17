@@ -6,7 +6,7 @@ import numpy as np
 # ---------------
     
 
-def generate_random_mixed_state(n_qubits: int) -> np.ndarray:
+def generate_random_mixed_state(n_qubits: int, seed: int = 0) -> np.ndarray:
     """
     Generate a random mixed state for n_qubits qubits using the Ginibre ensemble.
     Helper function for data generation.
@@ -15,13 +15,14 @@ def generate_random_mixed_state(n_qubits: int) -> np.ndarray:
     Only mixed states are produced here.
     """
     dim = 2 ** n_qubits
+    np.random.seed(seed)
     G = (np.random.normal(size=(dim, dim))
          + 1j * np.random.normal(size=(dim, dim)))
     rho = G @ G.conj().T
     rho /= np.trace(rho)
     return rho
 
-def generate_dataset_of_states_and_probabilities(N: int, n_qubits: int):
+def generate_dataset_of_states_and_probabilities(N: int, n_qubits: int, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
     """
     A function to generate a dataset of N random mixed states and their corresponding Cholesky decompositions.
     
@@ -36,11 +37,72 @@ def generate_dataset_of_states_and_probabilities(N: int, n_qubits: int):
     rhos = np.empty(N, dtype=object)
     taus = np.empty(N, dtype=object)
     for k in range(N):
-        rho = generate_random_mixed_state(n_qubits)
+        rho = generate_random_mixed_state(n_qubits, seed)
         rhos[k] = rho
         taus[k] = np.linalg.cholesky(rho)
 
     return rhos, taus
+
+def add_train_test_split_to_data(data: dict, train_ratio: float = 0.8, seed: int = 0) -> dict:
+    """
+    Add train/test indices into data["split"] without duplicating arrays.
+    """
+    rng = np.random.default_rng(seed)
+    N = len(data["rhos"])
+    idx = rng.permutation(N)
+    split = int(train_ratio * N)
+
+    data["split"] = {
+        "train_idx": idx[:split],
+        "test_idx": idx[split:],
+        "train_ratio": train_ratio,
+        "seed": seed,
+    }
+    return data
+
+
+def subset_data_by_idx(data: dict, idx: np.ndarray) -> dict:
+    """
+    Return a smaller data dict containing only samples in idx, while copying shared metadata.
+    """
+    def subset(arr):
+        # list/object array/stacked array all OK
+        if isinstance(arr, list):
+            return [arr[i] for i in idx]
+        return arr[idx]
+
+    out = {}
+
+    # sample-wise keys (subset these if present)
+    for k in ["rhos", "taus", "counts"]:
+        if k in data:
+            out[k] = subset(data[k])
+
+    # shared keys (copy through if present)
+    for k in ["shots", "P", "P_noisy", "misalignment_sigma", "visibility", "n_qubits"]:
+        if k in data:
+            out[k] = data[k]
+
+    return out
+
+
+def get_split(data: dict, which: str) -> dict:
+    """
+    Convenience: get_split(data,"train") or get_split(data,"test").
+    Requires data["split"] to exist.
+    """
+    if "split" not in data:
+        raise KeyError('No split found. Call add_train_test_split_to_data(...) first.')
+
+    if which == "train":
+        idx = data["split"]["train_idx"]
+    elif which == "test":
+        idx = data["split"]["test_idx"]
+    else:
+        raise ValueError('which must be "train" or "test".')
+
+    return subset_data_by_idx(data, idx)
+
 
 #--------------------------------------------------
 # SETTING UP IDEAL/ NOISY PROJECTOR MATRICES
@@ -309,3 +371,299 @@ def stokes_reconstruct_dataset(P: np.ndarray,
         stokes_rhos[k] = rho_hat
 
     return stokes_rhos
+
+
+def fidelity(rho: np.ndarray, sigma: np.ndarray, eps: float = 1e-12) -> float:
+    """
+    Uhlmann fidelity F(rho,sigma) in [0,1] (NumPy; for evaluation/plots).
+    """
+    rho = 0.5 * (rho + rho.conj().T)
+    sigma = 0.5 * (sigma + sigma.conj().T)
+
+    w, V = np.linalg.eigh(rho)
+    w = np.clip(np.real(w), 0.0, None)
+    sqrt_rho = V @ np.diag(np.sqrt(w + eps)) @ V.conj().T
+
+    inner = sqrt_rho @ sigma @ sqrt_rho
+    inner = 0.5 * (inner + inner.conj().T)
+
+    w2, _ = np.linalg.eigh(inner)
+    w2 = np.clip(np.real(w2), 0.0, None)
+
+    tr_sqrt = np.sum(np.sqrt(w2 + eps))
+    F = float(np.clip(tr_sqrt**2, 0.0, 1.0))
+    return F
+
+    
+# ------------------------------------------
+#NEURAL NETWORK IMPLEMENTATION
+# ------------------------------------------
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
+
+def tau_params_to_rho_torch(params: torch.Tensor, n_qubits: int, eps: float = 1e-12) -> torch.Tensor:
+    """
+    Real tau-params -> rho = tau^† tau / Tr(...).
+    params: (B, d^2) real. Lower-triangular tau with real diagonal, off-diagonal (re,im) pairs.
+
+    Converts the NN output (Cholesky parameters) into a density matrix rho, ensuring it is Hermitian, positive semi-definite, and has trace 1.
+    """
+    B = params.shape[0]
+    d = 2 ** n_qubits
+    if params.shape[1] != d * d:
+        raise ValueError(f"Expected params dim {d*d}, got {params.shape[1]}.")
+
+    tau = torch.zeros((B, d, d), dtype=torch.complex64, device=params.device)
+
+    k = 0
+    for i in range(d):
+        for j in range(i + 1):
+            if i == j:
+                tau[:, i, j] = params[:, k].to(torch.complex64)
+                k += 1
+            else:
+                re = params[:, k]
+                im = params[:, k + 1]
+                tau[:, i, j] = (re + 1j * im).to(torch.complex64)
+                k += 2
+
+    rho = tau.conj().transpose(-1, -2) @ tau
+    rho = 0.5 * (rho + rho.conj().transpose(-1, -2))
+    tr = torch.real(torch.diagonal(rho, dim1=-2, dim2=-1).sum(-1))
+    rho = rho / (tr.view(-1, 1, 1) + eps)
+    return rho
+
+
+def make_mlp(input_dim: int, output_dim: int, hidden_sizes=(256, 256), dropout: float = 0.0) -> nn.Module:
+    """
+    Builds a standard fully connected multilayer perceptron (MLP) with ReLU activations and optional dropout.
+    """
+    layers = []
+    prev = input_dim
+    for h in hidden_sizes:
+        layers += [nn.Linear(prev, h), nn.ReLU()]
+        if dropout and dropout > 0:
+            layers += [nn.Dropout(dropout)]
+        prev = h
+    layers += [nn.Linear(prev, output_dim)]
+    return nn.Sequential(*layers)
+
+
+class NN_Builder:
+    """
+    Minimal NN trainer for QST.
+    - model_type: "mlp" or "cnn" (only MLP implemented for now)
+    - loss_type:  "mse" or "fidelity"
+    - target:     "tau" (recommended) or "rho" (optional)
+    """
+
+    def __init__(self,
+                 n_qubits: int,
+                 model_type: str = "mlp",
+                 loss_type: str = "mse",
+                 target: str = "tau",
+                 hidden_sizes=(256, 256),
+                 dropout: float = 0.0,
+                 lr: float = 1e-3,
+                 batch_size: int = 64,
+                 epochs: int = 50,
+                 device: str | None = None,
+                 seed: int = 0):
+
+        self.n_qubits = n_qubits
+        self.d = 2 ** n_qubits
+
+        self.model_type = model_type
+        self.loss_type = loss_type
+        self.target = target
+
+        self.hidden_sizes = tuple(hidden_sizes)
+        self.dropout = dropout
+        self.lr = lr
+        self.batch_size = batch_size
+        self.epochs = epochs
+
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+
+        self.input_dim = 6 ** n_qubits  # flattened freqs
+        self.output_dim = (self.d * self.d) if target == "tau" else (2 * self.d * self.d)
+
+        self.model = self._build_model().to(self.device)
+
+
+    # Torch fidelity used for training (kept with the NN system)
+    @staticmethod
+    def uhlmann_fidelity_torch(rho: torch.Tensor, sigma: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
+        """
+        Batched Uhlmann fidelity for training (torch; differentiable).
+        """
+        rho = 0.5 * (rho + rho.conj().transpose(-1, -2))
+        sigma = 0.5 * (sigma + sigma.conj().transpose(-1, -2))
+
+        w, V = torch.linalg.eigh(rho)
+        w = torch.clamp(w.real, min=0.0)
+        sqrt_rho = V @ torch.diag_embed(torch.sqrt(w + eps)).to(V.dtype) @ V.conj().transpose(-1, -2)
+
+        inner = sqrt_rho @ sigma @ sqrt_rho
+        inner = 0.5 * (inner + inner.conj().transpose(-1, -2))
+
+        w2, _ = torch.linalg.eigh(inner)
+        w2 = torch.clamp(w2.real, min=0.0)
+
+        tr_sqrt = torch.sum(torch.sqrt(w2 + eps), dim=-1)
+        F = tr_sqrt**2
+        return torch.clamp(F.real, 0.0, 1.0)
+
+
+    def _build_model(self) -> nn.Module:
+        if self.model_type == "mlp":
+            return make_mlp(self.input_dim, self.output_dim, self.hidden_sizes, self.dropout)
+        if self.model_type == "cnn":
+            raise NotImplementedError("CNN not implemented yet. Add it in _build_model/_build_X later.")
+        raise ValueError(f"Unknown model_type: {self.model_type}")
+
+
+    def _build_X(self, data) -> torch.Tensor:
+        shots = data["shots"]
+        counts = data["counts"]
+
+        freqs = np.asarray(counts, dtype=float) / shots
+
+        X = freqs.reshape(len(freqs), -1).astype(np.float32)
+        return torch.from_numpy(X).to(self.device)
+
+
+    def _build_Y(self, data) -> torch.Tensor:
+        """
+        Finds the target Y for comparison, useful in the loss_type="mse" case.
+        """
+        if self.target == "tau":
+            taus = data["taus"]
+            taus_arr = np.stack(taus, axis=0)
+
+            N = taus_arr.shape[0]
+            params = np.zeros((N, self.d * self.d), dtype=np.float32)
+
+            k = 0
+            for i in range(self.d):
+                for j in range(i + 1):
+                    if i == j:
+                        params[:, k] = np.real(taus_arr[:, i, j])
+                        k += 1
+                    else:
+                        params[:, k] = np.real(taus_arr[:, i, j])
+                        params[:, k + 1] = np.imag(taus_arr[:, i, j])
+                        k += 2
+
+            return torch.from_numpy(params).to(self.device)
+
+        if self.target == "rho":
+            rhos = data["rhos"]
+            rhos_arr = np.stack(rhos, axis=0)
+            flat = rhos_arr.reshape(len(rhos_arr), -1)
+            Y = np.concatenate([flat.real, flat.imag], axis=1).astype(np.float32)
+            return torch.from_numpy(Y).to(self.device)
+
+        raise ValueError(f"Unknown target: {self.target}")
+
+
+    def _pred_to_rho(self, pred: torch.Tensor) -> torch.Tensor:
+        """
+        Convert the NN output back into a density matrix rho for loss calculation. Useful if loss_type is "fidelity", as the fidelity loss needs to compare density matrices directly.
+        """
+        if self.target == "tau":
+            return tau_params_to_rho_torch(pred, self.n_qubits)
+
+        B = pred.shape[0]
+        d = self.d
+        re = pred[:, : d * d]
+        im = pred[:, d * d :]
+        rho = (re + 1j * im).to(torch.complex64).reshape(B, d, d)
+        rho = 0.5 * (rho + rho.conj().transpose(-1, -2))
+        tr = torch.real(torch.diagonal(rho, dim1=-2, dim2=-1).sum(-1))
+        rho = rho / (tr.view(-1, 1, 1) + 1e-12)
+        return rho
+
+
+    def _true_rho_tensor(self, data) -> torch.Tensor:
+        """
+        Convert the true density matrices from the dataset into a torch tensor for comparison in the fidelity loss.
+        """
+        rhos = data["rhos"]
+        rhos_arr = np.stack(rhos, axis=0) if (isinstance(rhos, list) or (isinstance(rhos, np.ndarray) and rhos.dtype == object)) else np.asarray(rhos)
+        return torch.from_numpy(rhos_arr).to(self.device).to(torch.complex64)
+
+
+    def _loss(self, pred: torch.Tensor, Y: torch.Tensor, rho_true: torch.Tensor) -> torch.Tensor:
+        """
+        Compute the loss between the predicted output and the true target, depending on the specified loss type.
+
+        pred: (B, output_dim) tensor from the model
+        Y: (B, output_dim) tensor of true targets (used for MSE loss)
+        rho_true: (B, d, d) tensor of true density matrices (used for fidelity loss)
+        """
+        if self.loss_type == "mse":
+            return torch.mean((pred - Y) ** 2)
+
+        if self.loss_type == "fidelity":
+            rho_pred = self._pred_to_rho(pred)
+            F = self.uhlmann_fidelity_torch(rho_pred, rho_true)
+            return torch.mean(1.0 - F)
+
+        raise ValueError(f"Unknown loss_type: {self.loss_type}")
+
+
+    def fit(self, data_train):
+        X = self._build_X(data_train)
+        Y = self._build_Y(data_train) if self.loss_type == "mse" else None
+        rho_true_all = self._true_rho_tensor(data_train)
+
+        N = X.shape[0]
+        idx = torch.randperm(N, device=self.device)
+
+        optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+        history = {"loss": []}
+
+        prog_marker = max(1, self.epochs // 10)
+
+        self.model.train()
+        for epoch in range(self.epochs):
+            epoch_loss = 0.0
+            for start in range(0, N, self.batch_size):
+                bidx = idx[start:start + self.batch_size]
+                xb = X[bidx]
+                rb = rho_true_all[bidx]
+                yb = Y[bidx] if Y is not None else None
+
+                optimizer.zero_grad()
+                pred = self.model(xb)
+                loss = self._loss(pred, yb, rb)   # update _loss to allow Y=None
+                loss.backward()
+                optimizer.step()
+                epoch_loss += float(loss.detach().cpu())
+
+            history["loss"].append(epoch_loss)
+            if (epoch + 1) % prog_marker == 0 or epoch == 0:
+                print(f"Epoch {epoch + 1}/{self.epochs}, Loss: {epoch_loss:.4f}")
+
+        return history
+
+    def predict(self, data_any):
+        X = self._build_X(data_any)
+
+        self.model.eval()
+        with torch.no_grad():
+            pred_all = self.model(X)
+            rho_pred_all = self._pred_to_rho(pred_all).detach().cpu().numpy()
+
+        out = np.empty(len(rho_pred_all), dtype=object)
+        for k in range(len(rho_pred_all)):
+            out[k] = rho_pred_all[k]
+        return out
+

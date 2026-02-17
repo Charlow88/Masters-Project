@@ -6,7 +6,7 @@ import numpy as np
 # ---------------
     
 
-def generate_random_mixed_state(n_qubits: int, seed: int = 0) -> np.ndarray:
+def generate_random_mixed_state(n_qubits: int) -> np.ndarray:
     """
     Generate a random mixed state for n_qubits qubits using the Ginibre ensemble.
     Helper function for data generation.
@@ -15,7 +15,6 @@ def generate_random_mixed_state(n_qubits: int, seed: int = 0) -> np.ndarray:
     Only mixed states are produced here.
     """
     dim = 2 ** n_qubits
-    np.random.seed(seed)
     G = (np.random.normal(size=(dim, dim))
          + 1j * np.random.normal(size=(dim, dim)))
     rho = G @ G.conj().T
@@ -36,8 +35,9 @@ def generate_dataset_of_states_and_probabilities(N: int, n_qubits: int, seed: in
 
     rhos = np.empty(N, dtype=object)
     taus = np.empty(N, dtype=object)
+    np.random.seed(seed)
     for k in range(N):
-        rho = generate_random_mixed_state(n_qubits, seed)
+        rho = generate_random_mixed_state(n_qubits)
         rhos[k] = rho
         taus[k] = np.linalg.cholesky(rho)
 

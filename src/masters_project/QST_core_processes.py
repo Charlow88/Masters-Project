@@ -473,6 +473,52 @@ def make_mlp(input_dim: int, output_dim: int, hidden_sizes=(256, 256), dropout: 
     return nn.Sequential(*layers)
 
 
+class Flatten(nn.Module):
+    """Helper module to flatten CNN outputs before the final linear layer."""
+    def forward(self, x):
+        return x.view(x.size(0), -1)
+    
+def make_cnn_2d(
+    output_dim: int,
+    channels=(8, 16),
+    kernel_size=3,
+    pool=2,
+    hidden_sizes=(256,256),
+    dropout=0.0,
+):
+    """
+    Builds a simple 2D CNN for 2-qubit data (6x6 input), with configurable channels, kernel size, pooling, and MLP head.
+    """
+    layers = []
+    in_ch = 1
+
+    # CNN layers
+    for out_ch in channels:
+        layers += [
+            nn.Conv2d(in_ch, out_ch, kernel_size, padding=kernel_size // 2),
+            nn.ReLU()
+        ]
+        if pool and pool > 1:
+            layers += [nn.MaxPool2d(pool)]
+        in_ch = out_ch
+
+    layers += [nn.Flatten()]
+
+    # MLP head
+    for h in hidden_sizes:
+        layers += [
+            nn.LazyLinear(h),  # avoids manual flatten dim calc
+            nn.ReLU(),
+        ]
+        if dropout > 0:
+            layers += [nn.Dropout(dropout)]
+
+    layers += [nn.LazyLinear(output_dim)]
+
+    return nn.Sequential(*layers)
+
+
+
 class NN_Builder:
     """
     Minimal NN trainer for QST.
@@ -488,6 +534,8 @@ class NN_Builder:
                  target: str = "tau",
                  hidden_sizes=(256, 256),
                  dropout: float = 0.0,
+                 cnn_channels=(8,16),
+                 cnn_kernel_size=3,
                  lr: float = 1e-3,
                  batch_size: int = 64,
                  epochs: int = 50,
@@ -503,6 +551,8 @@ class NN_Builder:
 
         self.hidden_sizes = tuple(hidden_sizes)
         self.dropout = dropout
+        self.cnn_channels = cnn_channels
+        self.cnn_kernel_size = cnn_kernel_size
         self.lr = lr
         self.batch_size = batch_size
         self.epochs = epochs
@@ -545,20 +595,28 @@ class NN_Builder:
     def _build_model(self) -> nn.Module:
         if self.model_type == "mlp":
             return make_mlp(self.input_dim, self.output_dim, self.hidden_sizes, self.dropout)
+        
         if self.model_type == "cnn":
-            raise NotImplementedError("CNN not implemented yet. Add it in _build_model/_build_X later.")
+            return make_cnn_2d(output_dim=self.output_dim, channels=self.cnn_channels, kernel_size=self.cnn_kernel_size, hidden_sizes=self.hidden_sizes, dropout=self.dropout)
+        
         raise ValueError(f"Unknown model_type: {self.model_type}")
 
 
     def _build_X(self, data) -> torch.Tensor:
         shots = data["shots"]
         counts = data["counts"]
-
         freqs = np.asarray(counts, dtype=float) / shots
 
-        X = freqs.reshape(len(freqs), -1).astype(np.float32)
-        return torch.from_numpy(X).to(self.device)
+        if self.model_type == "mlp":
+            X = freqs.reshape(len(freqs), -1).astype(np.float32)
+            return torch.from_numpy(X).to(self.device)
 
+        if self.model_type == "cnn":
+            if self.n_qubits != 2:
+                raise NotImplementedError("CNN only implemented for 2 qubits (36 input projectors). Add more channels/filters and reshape logic for more qubits.")
+            
+            X = freqs.reshape(len(freqs), 1, 6, 6).astype(np.float32) # CNN expects NCHW format (Number of samples in batch, channels, height, width)
+            return torch.from_numpy(X).to(self.device)
 
     def _build_Y(self, data) -> torch.Tensor:
         """

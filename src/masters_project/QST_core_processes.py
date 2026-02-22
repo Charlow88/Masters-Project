@@ -536,6 +536,8 @@ class NN_Builder:
                  dropout: float = 0.0,
                  cnn_channels=(8,16),
                  cnn_kernel_size=3,
+                 cnn_kernel_type: str = "standard",         # "standard" or "proj_kernel"
+                 proj_kernel_metric: str = "overlap",       # "overlap" or "fidelity" (only used if proj_kernel)             
                  lr: float = 1e-3,
                  batch_size: int = 64,
                  epochs: int = 50,
@@ -553,6 +555,8 @@ class NN_Builder:
         self.dropout = dropout
         self.cnn_channels = cnn_channels
         self.cnn_kernel_size = cnn_kernel_size
+        self.cnn_kernel_type = cnn_kernel_type
+        self.proj_kernel_metric = proj_kernel_metric
         self.lr = lr
         self.batch_size = batch_size
         self.epochs = epochs
@@ -565,6 +569,7 @@ class NN_Builder:
         self.input_dim = 6 ** n_qubits  # flattened freqs
         self.output_dim = (self.d * self.d) if target == "tau" else (2 * self.d * self.d)
 
+        self._prepare_proj_kernel_mixer()
         self.model = self._build_model().to(self.device)
 
 
@@ -600,6 +605,66 @@ class NN_Builder:
             return make_cnn_2d(output_dim=self.output_dim, channels=self.cnn_channels, kernel_size=self.cnn_kernel_size, hidden_sizes=self.hidden_sizes, dropout=self.dropout)
         
         raise ValueError(f"Unknown model_type: {self.model_type}")
+    
+    
+    def _compute_projector_kernel_matrix(self) -> np.ndarray:
+        """
+        Build K (36x36) from two-qubit projectors P_ij = P_i ⊗ P_j.
+
+        Metrics:
+        - overlap:  K_ab = Tr(P_a P_b)
+        - fidelity: K_ab = |Tr(P_a P_b)|^2
+
+        K is a 36x36 matrix that captures the closeness of the 36 projectors to each other
+        """
+        if self.n_qubits != 2:
+            raise NotImplementedError("proj_kernel currently implemented for n_qubits==2 only.")
+
+        metric = getattr(self, "proj_kernel_metric", "overlap")
+        if metric not in ("overlap", "fidelity"):
+            raise ValueError(f"proj_kernel_metric must be 'overlap' or 'fidelity', got {metric}")
+
+        P = build_projector_matrix(self.n_qubits)  # shape (6,6) object, each entry is (4x4)
+        proj_list = [P[i, j] for i in range(6) for j in range(6)]  # row-major: a = 6*i + j
+
+        K = np.zeros((36, 36), dtype=np.float64)
+        for a in range(36):
+            Pa = proj_list[a]
+            for b in range(36):
+                Pb = proj_list[b]
+                t = np.trace(Pa @ Pb)
+                # should be real for projectors, but keep it safe numerically
+                if metric == "overlap":
+                    K[a, b] = float(np.real(t))
+                else:  # fidelity-like
+                    K[a, b] = float(np.abs(t) ** 2)
+
+        return K
+
+
+    @staticmethod
+    def _row_normalise(M: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+        row_sums = M.sum(axis=1, keepdims=True)
+        return M / (row_sums + eps)
+
+
+    def _prepare_proj_kernel_mixer(self) -> None:
+        """
+        Precompute a fixed 36x36 mixing matrix for the CNN input
+        Stored as self._cnn_mixer or None.
+        """
+        self._cnn_mixer = None
+
+        if self.model_type != "cnn":
+            return
+        if self.cnn_kernel_type == "standard":
+            return
+        if self.cnn_kernel_type != "proj_kernel":
+            raise ValueError(f"Unknown cnn_kernel_type: {self.cnn_kernel_type}")
+
+        K = self._compute_projector_kernel_matrix()
+        M = self._row_normalise(K)
+        self._cnn_mixer = M.astype(np.float32)
 
 
     def _build_X(self, data) -> torch.Tensor:
@@ -615,7 +680,12 @@ class NN_Builder:
             if self.n_qubits != 2:
                 raise NotImplementedError("CNN only implemented for 2 qubits (36 input projectors). Add more channels/filters and reshape logic for more qubits.")
             
-            X = freqs.reshape(len(freqs), 1, 6, 6).astype(np.float32) # CNN expects NCHW format (Number of samples in batch, channels, height, width)
+            F = freqs.reshape(len(freqs), -1).astype(np.float32)  # (N, 36)
+
+            if getattr(self, "_cnn_mixer", None) is not None:
+                F = F @ self._cnn_mixer.T  # (N,36)
+
+            X = F.reshape(len(freqs), 1, 6, 6).astype(np.float32) # CNN expects NCHW format (Number of samples in batch, channels, height, width)
             return torch.from_numpy(X).to(self.device)
 
     def _build_Y(self, data) -> torch.Tensor:

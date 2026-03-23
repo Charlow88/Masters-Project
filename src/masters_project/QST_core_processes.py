@@ -482,7 +482,6 @@ def make_cnn_2d(
     output_dim: int,
     channels=(8, 16),
     kernel_size=3,
-    pool=2,
     hidden_sizes=(256,256),
     dropout=0.0,
 ):
@@ -498,8 +497,6 @@ def make_cnn_2d(
             nn.Conv2d(in_ch, out_ch, kernel_size, padding=kernel_size // 2),
             nn.ReLU()
         ]
-        if pool and pool > 1:
-            layers += [nn.MaxPool2d(pool)]
         in_ch = out_ch
 
     layers += [nn.Flatten()]
@@ -537,7 +534,8 @@ class NN_Builder:
                  cnn_channels=(8,16),
                  cnn_kernel_size=3,
                  cnn_kernel_type: str = "standard",         # "standard" or "proj_kernel"
-                 proj_kernel_metric: str = "overlap",       # "overlap" or "fidelity" (only used if proj_kernel)             
+                 proj_kernel_metric: str = "overlap",       # "overlap" or "fidelity" (only used if proj_kernel)     
+                 proj_graph_top_k: int = 8,       
                  lr: float = 1e-3,
                  batch_size: int = 64,
                  epochs: int = 50,
@@ -557,6 +555,7 @@ class NN_Builder:
         self.cnn_kernel_size = cnn_kernel_size
         self.cnn_kernel_type = cnn_kernel_type
         self.proj_kernel_metric = proj_kernel_metric
+        self.proj_graph_top_k = proj_graph_top_k
         self.lr = lr
         self.batch_size = batch_size
         self.epochs = epochs
@@ -569,7 +568,7 @@ class NN_Builder:
         self.input_dim = 6 ** n_qubits  # flattened freqs
         self.output_dim = (self.d * self.d) if target == "tau" else (2 * self.d * self.d)
 
-        self._prepare_proj_kernel_mixer()
+        self._prepare_cnn_mixer()
         self.model = self._build_model().to(self.device)
 
 
@@ -640,6 +639,20 @@ class NN_Builder:
                     K[a, b] = float(np.abs(t) ** 2)
 
         return K
+    
+
+    @staticmethod
+    def _topk_sparsify(M: np.ndarray, k: int) -> np.ndarray:
+        """
+        Keep only top-k entries per row (including the diagonal if present), zero the rest.
+        """
+        n = M.shape[0]
+        k = max(1, min(k, n))
+        out = np.zeros_like(M)
+        for i in range(n):
+            idx = np.argpartition(M[i], -k)[-k:]
+            out[i, idx] = M[i, idx]
+        return out
 
 
     @staticmethod
@@ -648,22 +661,45 @@ class NN_Builder:
         return M / (row_sums + eps)
 
 
-    def _prepare_proj_kernel_mixer(self) -> None:
+    def _prepare_cnn_mixer(self) -> None:
         """
-        Precompute a fixed 36x36 mixing matrix for the CNN input
-        Stored as self._cnn_mixer or None.
+        Precompute a fixed 36x36 mixing matrix for the CNN input.
+        Stored as self._cnn_mixer (np.float32) or None.
+
+        cnn_kernel_type:
+        - "standard": no mixing
+        - "proj_kernel": dense row-normalised projector kernel (Option 1)
+        - "proj_graph": sparse top-k + normalised adjacency (Option 3)
         """
         self._cnn_mixer = None
 
         if self.model_type != "cnn":
             return
+
         if self.cnn_kernel_type == "standard":
             return
-        if self.cnn_kernel_type != "proj_kernel":
+
+        # Reuse your existing projector similarity matrix builder
+        # metric handled inside _compute_projector_kernel_matrix via self.proj_kernel_metric
+        S = self._compute_projector_kernel_matrix()  # (36,36)
+
+        if self.cnn_kernel_type == "proj_kernel":
+            M = self._row_normalise(S)
+
+        elif self.cnn_kernel_type == "proj_graph":
+
+            A = S.copy()
+            np.fill_diagonal(A, np.diag(S))
+
+            # Adjacency matrix from similarity: keeps the top k closest neighbours in the 36x36 similarity matrix, zeroes the rest. Keeps the diagonal (self-edges) intact.
+            A = self._topk_sparsify(A, k=self.proj_graph_top_k)
+
+            # Normalise
+            M = self._row_normalise(A)
+
+        else:
             raise ValueError(f"Unknown cnn_kernel_type: {self.cnn_kernel_type}")
 
-        K = self._compute_projector_kernel_matrix()
-        M = self._row_normalise(K)
         self._cnn_mixer = M.astype(np.float32)
 
 

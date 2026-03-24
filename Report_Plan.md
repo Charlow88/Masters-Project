@@ -6,6 +6,14 @@
    - Implement Maximum Likelihood Estimation (MLE) reconstruction.
    - Ensure Stokes reconstruction, neural networks, and scaling code all run cleanly.
    - Finalise noise models and dataset generation.
+   Record mixed and pure states seperately, mention that more pure in short pulse, less otherwise, reference paper
+   Reference Wang for numbers on visibility, when cooled can reach 98%, decreases to 90% at room temp, use 93% as default.
+   Nasa paper for 0.08 degree misalignemnt
+
+### To do Wed 25 March
+   - Find a paper that gives a reasonable number of shots to use
+   - Generate the datasets that will be used for all analysis, storing them as JSON files.
+   - Start doing hyperparameter exploration to improve NN performance. 
 
 2. **Run final experiments**
    - Generate full datasets.
@@ -58,11 +66,13 @@
 - Understand the **photonic polarisation tomography experiment**.
 - Know the role of **waveplates, polarising beam splitters, and detectors**.
 - Explain how measurement projectors arise from the physical setup.
+- Justify which states are used (relevant to physics context?)
 
 ## Data and Noise
 - Explain measurement noise sources.
 - Mention **counting statistics scaling (1 / √N)**.
 - Clearly state how noise and probabilities are simulated.
+- State mix of mixed and pure states and why chosen.
 
 ## Statistical Rigor
 - Always report:

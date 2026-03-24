@@ -191,26 +191,23 @@ def build_projector_matrix(n_qubits: int) -> np.ndarray:
         raise NotImplementedError("Projector matrix construction only implemented for up to 4 qubits.")
         
 
-def simulate_waveplate_misalignment(sigma: float, P: np.ndarray, n_qubits: int) -> np.ndarray:
-    """Rotate the entire projector matrix P by independent noisy unitaries on each qubit.
-    
-    This is a helper function designed to simulate the effect of misalignment in the measurement apparatus, 
-    ie. waveplates not perfectly correct.
-    """
+def simulate_waveplate_misalignment(P: np.ndarray, n_qubits: int) -> np.ndarray:
+    """Rotate the entire projector matrix P by small local basis errors on each qubit.
+    delta: rotation angle in radians, applied to each qubit's measurement basis, normally 0.08 degrees."""
 
-    def noisy_unitary(sigma: float) -> np.ndarray:
-        """Random SU(2) unitary from Gaussian-distributed Euler angles."""
-        theta, phi, zeta = np.random.normal(0, sigma, 3)
-        U = np.array([
-            [np.exp(1j * phi / 2) * np.cos(theta),
-             -1j * np.exp(1j * zeta) * np.sin(theta)],
-            [-1j * np.exp(-1j * zeta) * np.sin(theta),
-             np.exp(-1j * phi / 2) * np.cos(theta)]
-        ], dtype=complex)
+    def noisy_unitary(delta: float) -> np.ndarray:
+        """Small single-angle qubit rotation."""
+
+        sy = np.array([[0, -1j],
+                       [1j, 0]], dtype=complex)
+
+        I = np.eye(2, dtype=complex)
+
+        U = np.cos(delta / 2) * I - 1j * np.sin(delta / 2) * sy
         return U
     
    
-    unitaries = [noisy_unitary(sigma) for _ in range(n_qubits)]
+    unitaries = [noisy_unitary(np.deg2rad(0.08)) for _ in range(n_qubits)]
     U = unitaries[0]
     for i in range(1, n_qubits):
         U = np.kron(U, unitaries[i])
@@ -287,7 +284,7 @@ def get_measurement_probs_from_P_and_rho(rho: np.ndarray, P: np.ndarray, n_qubit
         raise NotImplementedError("Measurement only implemented for up to 4 qubits.")
     
 
-def simulate_interference_visibility(p: np.ndarray, visibility: float) -> np.ndarray:
+def simulate_interference_visibility(p: np.ndarray, visibility: float = 0.93) -> np.ndarray:
     """
     Mix probabilities with uniform noise to model limited measurement visibility/contrast.
     visibility=1 gives p unchanged; visibility<1 washes outcomes towards uniform.
@@ -315,9 +312,6 @@ def retrieve_counts_from_n_shots_per_state(p: np.ndarray, n_shots: int) -> np.nd
     counts_flat = np.random.multinomial(n_shots, p_flat)
     return counts_flat.reshape(p.shape)
 
-# ---------------------
-# STOKES RECONSTRUCTION
-# ---------------------
 
 def counts_to_frequencies(counts: np.ndarray, shots: int) -> np.ndarray:
     """
@@ -326,6 +320,10 @@ def counts_to_frequencies(counts: np.ndarray, shots: int) -> np.ndarray:
 
     f = np.asarray(counts, dtype=float) / shots
     return f
+
+# --------------------------
+# STOKES RECONSTRUCTION/ MLE
+# --------------------------
 
 
 def build_stokes_matrix(P: np.ndarray, n_qubits: int) -> np.ndarray:
@@ -417,7 +415,7 @@ def fidelity(rho: np.ndarray, sigma: np.ndarray, eps: float = 1e-12) -> float:
 
     
 # ------------------------------------------
-#NEURAL NETWORK IMPLEMENTATION
+#NEURAL NETWORK & MLE IMPLEMENTATION
 # ------------------------------------------
 
 import torch
@@ -456,6 +454,119 @@ def tau_params_to_rho_torch(params: torch.Tensor, n_qubits: int, eps: float = 1e
     tr = torch.real(torch.diagonal(rho, dim1=-2, dim2=-1).sum(-1))
     rho = rho / (tr.view(-1, 1, 1) + eps)
     return rho
+
+
+
+
+def flatten_projectors(P: np.ndarray) -> list[np.ndarray]:
+    """
+    Flatten projector array P into a list.
+    Works for any number of qubits.
+    """
+    return [P[idx] for idx in np.ndindex(P.shape)]
+
+
+def init_tau_params_identity(n_qubits: int) -> np.ndarray:
+    """
+    Initialise tau parameters so the starting state is roughly maximally mixed.
+    """
+    d = 2 ** n_qubits
+    params = np.zeros(d * d, dtype=np.float32)
+
+    k = 0
+    for i in range(d):
+        for j in range(i + 1):
+            if i == j:
+                params[k] = 1.0
+                k += 1
+            else:
+                k += 2
+
+    return params
+
+
+def mle_reconstruct_single(
+    P: np.ndarray,
+    counts: np.ndarray,
+    n_qubits: int,
+    lr: float = 1e-2,
+    steps: int = 500,
+    eps: float = 1e-10,
+    device: str | None = None,
+) -> np.ndarray:
+    """
+    MLE reconstruction for one quantum state.
+    """
+    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+
+    proj_list = flatten_projectors(P)
+
+    proj_tensor = torch.tensor(
+        np.stack(proj_list),
+        dtype=torch.complex64,
+        device=device
+    )
+
+    counts_t = torch.tensor(
+        np.asarray(counts).reshape(-1),
+        dtype=torch.float32,
+        device=device
+    )
+
+    params = torch.tensor(
+        init_tau_params_identity(n_qubits)[None, :],
+        dtype=torch.float32,
+        device=device,
+        requires_grad=True
+    )
+
+    optimizer = torch.optim.Adam([params], lr=lr)
+
+    for _ in range(steps):
+
+        optimizer.zero_grad()
+
+        rho = tau_params_to_rho_torch(params, n_qubits)[0]
+
+        probs = torch.real(torch.einsum("aij,ji->a", proj_tensor, rho))
+
+        probs = torch.clamp(probs, min=eps)
+        probs = probs / torch.sum(probs)
+
+        nll = -torch.sum(counts_t * torch.log(probs))
+
+        nll.backward()
+        optimizer.step()
+
+    with torch.no_grad():
+        rho_final = tau_params_to_rho_torch(params, n_qubits)[0].cpu().numpy()
+
+    return rho_final
+
+
+def mle_reconstruct_dataset(
+    P: np.ndarray,
+    counts,
+    n_qubits: int,
+    lr: float = 1e-2,
+    steps: int = 500,
+) -> np.ndarray:
+    """
+    Apply MLE reconstruction to a dataset.
+    """
+    mle_rhos = np.empty(len(counts), dtype=object)
+
+    for k, counts_k in enumerate(counts):
+
+        mle_rhos[k] = mle_reconstruct_single(
+            P=P,
+            counts=counts_k,
+            n_qubits=n_qubits,
+            lr=lr,
+            steps=steps
+        )
+
+    return mle_rhos
 
 
 def make_mlp(input_dim: int, output_dim: int, hidden_sizes=(256, 256), dropout: float = 0.0) -> nn.Module:

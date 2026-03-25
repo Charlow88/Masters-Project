@@ -11,10 +11,9 @@
    Nasa paper for 0.08 degree misalignemnt
    - sweep over shots, as there's no set value, it explores how this affects results. Lohani goes 5-200, others say 100, up to 1000 is accepted. Just sweep and explain this. Make sure to explain how uncertainty scales with the number of shots 1 / root N
 
-### To do Wed 25 March
-   - Find a paper that gives a reasonable number of shots to use.
-   - Generate the datasets that will be used for all analysis, storing them as JSON files.
-   - Start doing hyperparameter exploration to improve NN performance.
+### Notes for what to do tomorrow:
+   - Need to change how fit function operates in order to have a more meaningful loss curve, loss over epochs should be evaluated on a hold out not on the training set, so incorporate the test set into this fit function to evaluate on. 
+   - Then, once everything is being stored correctly, can save best epoch and final epoch to check not overfitting and run CV for param optimisation
 
 2. **Run final experiments**
    - Generate full datasets.
@@ -62,6 +61,7 @@
 - Include **MLE reconstruction** as the standard classical optimisation method.
 - Compare against **fully connected neural networks and CNNs**.
 - Clearly justify **architecture choices and hyperparameters**.
+Need to find papers explaining things such as dropout and justifying them as a regularisation method
 
 ## Physics Context
 - Understand the **photonic polarisation tomography experiment**.

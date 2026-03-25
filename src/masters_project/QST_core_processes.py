@@ -651,7 +651,9 @@ class NN_Builder:
                  batch_size: int = 64,
                  epochs: int = 50,
                  device: str | None = None,
-                 seed: int = 0):
+                 seed: int = 0,
+                 print: bool = True
+                ):
 
         self.n_qubits = n_qubits
         self.d = 2 ** n_qubits
@@ -681,6 +683,7 @@ class NN_Builder:
 
         self._prepare_cnn_mixer()
         self.model = self._build_model().to(self.device)
+        self.print = print
 
 
     # Torch fidelity used for training (kept with the NN system)
@@ -944,8 +947,8 @@ class NN_Builder:
                 optimizer.step()
                 epoch_loss += float(loss.detach().cpu())
 
-            history["loss"].append(epoch_loss)
-            if (epoch + 1) % prog_marker == 0 or epoch == 0:
+            history["loss"].append(epoch_loss / int(np.ceil((N / self.batch_size))))
+            if (epoch + 1) % prog_marker == 0 or epoch == 0 and self.print == True:
                 print(f"Epoch {epoch + 1}/{self.epochs}, Loss: {epoch_loss:.4f}")
 
         return history

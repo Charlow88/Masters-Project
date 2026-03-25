@@ -9,11 +9,12 @@
    Record mixed and pure states seperately, mention that more pure in short pulse, less otherwise, reference paper
    Reference Wang for numbers on visibility, when cooled can reach 98%, decreases to 90% at room temp, use 93% as default.
    Nasa paper for 0.08 degree misalignemnt
+   - sweep over shots, as there's no set value, it explores how this affects results. Lohani goes 5-200, others say 100, up to 1000 is accepted. Just sweep and explain this. Make sure to explain how uncertainty scales with the number of shots 1 / root N
 
 ### To do Wed 25 March
-   - Find a paper that gives a reasonable number of shots to use
+   - Find a paper that gives a reasonable number of shots to use.
    - Generate the datasets that will be used for all analysis, storing them as JSON files.
-   - Start doing hyperparameter exploration to improve NN performance. 
+   - Start doing hyperparameter exploration to improve NN performance.
 
 2. **Run final experiments**
    - Generate full datasets.

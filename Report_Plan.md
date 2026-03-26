@@ -62,6 +62,7 @@
 - Compare against **fully connected neural networks and CNNs**.
 - Clearly justify **architecture choices and hyperparameters**.
 Need to find papers explaining things such as dropout and justifying them as a regularisation method
+Should showcase in report the the hyperparameters were tuned using a seperate validation set (50% pure mixed split) and then report shows test sets
 
 ## Physics Context
 - Understand the **photonic polarisation tomography experiment**.

@@ -652,7 +652,7 @@ class NN_Builder:
                  epochs: int = 50,
                  device: str | None = None,
                  seed: int = 0,
-                 print: bool = True
+                 print: bool = False
                 ):
 
         self.n_qubits = n_qubits
@@ -919,6 +919,9 @@ class NN_Builder:
 
 
     def fit(self, data_train):
+        """
+        Less useful now with the fit_and_predict method
+        """
         X = self._build_X(data_train)
         Y = self._build_Y(data_train) if self.loss_type == "mse" else None
         rho_true_all = self._true_rho_tensor(data_train)
@@ -954,6 +957,9 @@ class NN_Builder:
         return history
 
     def predict(self, data_any):
+        """
+        Less useful now with the fit_and_predict method
+        """
         X = self._build_X(data_any)
 
         self.model.eval()
@@ -966,3 +972,72 @@ class NN_Builder:
             out[k] = rho_pred_all[k]
         return out
 
+    def fit_and_predict(self, data_train, data_test):
+        # --- training data ---
+        X_train = self._build_X(data_train)
+        Y_train = self._build_Y(data_train) if self.loss_type == "mse" else None
+        rho_train = self._true_rho_tensor(data_train)
+
+        # --- holdout / evaluation data ---
+        X_test = self._build_X(data_test)
+        Y_test = self._build_Y(data_test) if self.loss_type == "mse" else None
+        rho_test = self._true_rho_tensor(data_test)
+
+        N_train = X_train.shape[0]
+        optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+        history = {"loss": []}
+
+        prog_marker = max(1, self.epochs // 10)
+
+        for epoch in range(self.epochs):
+            
+            idx = torch.randperm(N_train, device=self.device)
+
+            self.model.train()
+            for start in range(0, N_train, self.batch_size):
+                bidx = idx[start:start + self.batch_size]
+                xb = X_train[bidx]
+                rb = rho_train[bidx]
+                yb = Y_train[bidx] if Y_train is not None else None
+
+                optimizer.zero_grad()
+                pred = self.model(xb)
+                loss = self._loss(pred, yb, rb)
+                loss.backward()
+                optimizer.step()
+
+            # Holdout loss evaluation
+            self.model.eval()
+            eval_loss = 0.0
+            n_eval_batches = 0
+
+            with torch.no_grad():
+                N_test = X_test.shape[0]
+                for start in range(0, N_test, self.batch_size):
+                    xb = X_test[start:start + self.batch_size]
+                    rb = rho_test[start:start + self.batch_size]
+                    yb = Y_test[start:start + self.batch_size] if Y_test is not None else None
+
+                    pred = self.model(xb)
+                    batch_loss = self._loss(pred, yb, rb)
+                    eval_loss += float(batch_loss.detach().cpu())
+                    n_eval_batches += 1
+
+                history["loss"].append(eval_loss / n_eval_batches)
+
+            if self.print and ((epoch + 1) % prog_marker == 0 or epoch == 0):
+                print(
+                    f"Epoch {epoch + 1}/{self.epochs}, "
+                    f"Holdout Loss: {history['loss'][-1]:.4f}"
+                )
+
+        self.model.eval()
+        with torch.no_grad():
+            pred_all = self.model(X_test)
+            rho_pred_all = self._pred_to_rho(pred_all).detach().cpu().numpy()
+
+        out = np.empty(len(rho_pred_all), dtype=object)
+        for k in range(len(rho_pred_all)):
+            out[k] = rho_pred_all[k]
+
+        return history, out

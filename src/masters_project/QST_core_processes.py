@@ -1,5 +1,5 @@
 import numpy as np
-
+import time
 
 # ---------------
 # DATA GENERATION
@@ -1031,13 +1031,17 @@ class NN_Builder:
                     f"Holdout Loss: {history['loss'][-1]:.4f}"
                 )
 
+        
         self.model.eval()
+        start = time.time()
         with torch.no_grad():
             pred_all = self.model(X_test)
             rho_pred_all = self._pred_to_rho(pred_all).detach().cpu().numpy()
+        end = time.time()
+        eval_time = end - start
 
         out = np.empty(len(rho_pred_all), dtype=object)
         for k in range(len(rho_pred_all)):
             out[k] = rho_pred_all[k]
 
-        return history, out
+        return history, out, eval_time

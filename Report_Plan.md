@@ -41,6 +41,7 @@
    - Identify the key comparisons between methods.
    - Clarify which results are central to the story.
    - Note limitations and interpretation of results.
+   - INCLUDE T TESTS FOR HYPERPARAM OPTIMISED VALUES AND USE CONFIDENCE INTERVALS FOR THINGS
 
 7. **Begin writing once results and understanding are finalised**
    - Write with a clear narrative focused on method comparison.

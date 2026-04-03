@@ -1,3 +1,9 @@
+Introduction - 5-6 pages
+Methodology - 10-12 pages
+Results/ Discussion - 11-12 pages
+limits/ Future Work - 1 page
+Conclusion - 1 page
+
 # Introduction
 
 ## What is QST
@@ -570,6 +576,8 @@ Explain results of t-test comparisons.
 
 Explain that overlap mixing CNN does not significantly outperform physics-informed model. Use the t test results as mentioned in the methodology to verify this (do in a table maybe)
 
+Explain that CNNs don't compete as much and this could be due to all infomration globally affecting the outcome. Better at lower shots could imply that when there's less informationally complete data the CNNs find patterns that allow better predicitons, potentially a good low shot solution
+
 Explain that physics-informed model provides best balance of performance and simplicity.
 
 Explain rationale for selecting physics-informed model as final architecture.
@@ -600,7 +608,7 @@ Explain convergence behaviour of neural networks with increasing data.
 
 Explain the performance of the fidelities in each at different shots and in the different state types
 
-Very close in practical terms
+Explain that neural networks achieve reconstruction fidelity comparable to classical methods. In practical terms negiligible difference
 
 ---
 
@@ -615,6 +623,8 @@ Show that:
 - MLE enforces physicality through optimisation
 
 Explain significance for practical tomography.
+
+For physicality, for pure states, NN can struggle due to the small deviations at the Cholesky edge case mentioned prior, whereas MLE only tests physcial states so is fine by design.
 ---
 
 ### Runtime comparison
@@ -638,6 +648,8 @@ Explain that MLE requires optimisation for every reconstruction.
 
 Discuss implications for real-time tomography applications.
 
+Explain improvements obtained using physics-informed design. MLE suffers on time, Stokes on physicality, NN a good middle ground
+
 ---
 
 
@@ -657,26 +669,7 @@ Explain that experiment demonstrates feasibility of scaling approach.
 
 ---
 
-# Discussion/ Further Work
-
-## Interpretation of results
-
-Summarise main findings.
-
-Explain that CNNs don't compete as much and this could be due to all infomration globally affecting the outcome. Better at lower shots could imply that when there's less informationally complete data the CNNs find patterns that allow better predicitons, potentially a good low shot solution
-
-Explain that neural networks achieve reconstruction fidelity comparable to classical methods.
-
-Explain that classical linear inversion remains strong baseline for small systems.
-
-Explain limitations of naïve neural architectures.
-
-Explain improvements obtained using physics-informed design. MLE suffers on time, Stokes on physicality, NN a good middle ground
-
-For physicality, for pure states, NN can struggle due to the small deviations at the Cholesky edge case mentioned prior, whereas MLE only tests physcial states so is fine by design.
-
-
----
+# Limitations/ Further Work
 
 ## Advantages of neural network reconstruction
 

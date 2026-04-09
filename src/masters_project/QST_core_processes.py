@@ -207,7 +207,7 @@ def simulate_waveplate_misalignment(P: np.ndarray, n_qubits: int) -> np.ndarray:
         return U
     
    
-    unitaries = [noisy_unitary(np.deg2rad(0.08)) for _ in range(n_qubits)]
+    unitaries = [noisy_unitary(np.deg2rad(0.5)) for _ in range(n_qubits)]
     U = unitaries[0]
     for i in range(1, n_qubits):
         U = np.kron(U, unitaries[i])
